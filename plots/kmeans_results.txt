@@ -1,0 +1,9 @@
+K-MEANS vs NEURAL NETWORK COMPARISON
+==================================================
+
+K-Means Accuracy (unsupervised): 0.8333
+Neural Network Accuracy (supervised): 0.9733
+Improvement with supervision: 0.1400
+
+Note: K-Means clusters were mapped to true labels using majority vote.
+This represents the best possible accuracy for k-means on this task.

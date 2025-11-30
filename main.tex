@@ -1,0 +1,276 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{float}
+\usepackage{hyperref}
+\usepackage{caption}
+\usepackage{listings}
+\usepackage{xcolor}
+
+\lstset{
+    language=Python,
+    basicstyle=\ttfamily\small,
+    keywordstyle=\color{blue},
+    commentstyle=\color{gray},
+    stringstyle=\color{orange},
+    showstringspaces=false,
+    frame=single,
+    breaklines=true
+}
+
+\title{Neural Network Classification on the Iris Dataset}
+\author{Jason Li}
+\date{}
+
+\begin{document}
+
+\maketitle
+
+\section{Introduction}
+
+This project trains neural network classifiers on the Iris dataset using Keras, then explores two topics: (1) how different activation functions affect learning, and (2) how network architecture (depth and width) impacts performance. I also compare the neural network results to unsupervised k-means clustering.
+
+\section{Methods}
+
+\subsection{Activation Functions Tested}
+
+The lecture introduced several activation functions. The simplest is the \textbf{threshold function}:
+\begin{equation}
+    y = \begin{cases} 0 & x < 0 \\ 1 & x \geq 0 \end{cases}
+\end{equation}
+
+The threshold function outputs binary values (0 or 1) based on whether the input exceeds zero. However, it is not differentiable, so we cannot use gradient descent to train networks with it. The \textbf{sigmoid} function was introduced as a smooth, differentiable alternative:
+\begin{equation}
+    \sigma(x) = \frac{1}{1 + e^{-x}}
+\end{equation}
+
+Sigmoid outputs values between 0 and 1 and can be seen as a ``soft'' version of the threshold. We also try \textbf{tanh}, which outputs values between -1 and 1, and \textbf{ReLU} ($\max(0, x)$), which is popular in deep learning because it does not saturate for positive inputs.
+
+I tested sigmoid, tanh, and ReLU using the same network architecture (4$\rightarrow$8$\rightarrow$3). Here is the core model-building code:
+
+\begin{lstlisting}
+# build the model. same architecture for all (4 -> 8 -> 3)
+model = Sequential([
+    Dense(8, input_shape=(4,), activation=activation),
+    Dense(3, activation='softmax')
+])
+
+model.compile(
+    optimizer='adam',
+    loss='categorical_crossentropy',
+    metrics=['accuracy']
+)
+\end{lstlisting}
+
+\subsection{Network Architectures Tested}
+
+The lecture showed that a two-layer linear network is equivalent to a one-layer linear network (the ``degeneracy'' of linear networks). This means we need nonlinear activations to benefit from multiple layers. I tested three architectures, all using ReLU:
+
+\begin{enumerate}
+    \item \textbf{Shallow}: 4$\rightarrow$4$\rightarrow$3 (one hidden layer, 4 neurons)
+    \item \textbf{Wide}: 4$\rightarrow$16$\rightarrow$3 (one hidden layer, 16 neurons)
+    \item \textbf{Deep}: 4$\rightarrow$8$\rightarrow$8$\rightarrow$3 (two hidden layers, 8 neurons each)
+\end{enumerate}
+
+The code builds these architectures dynamically:
+
+\begin{lstlisting}
+architectures = {
+    'shallow': {'name': 'Shallow (4->4->3)', 'layers': [4]},
+    'wide': {'name': 'Wide (4->16->3)', 'layers': [16]},
+    'deep': {'name': 'Deep (4->8->8->3)', 'layers': [8, 8]}
+}
+
+# build the model
+model = Sequential()
+model.add(Dense(arch_config['layers'][0], input_shape=(4,), activation='relu'))
+for units in arch_config['layers'][1:]:
+    model.add(Dense(units, activation='relu'))
+model.add(Dense(3, activation='softmax'))
+\end{lstlisting}
+
+\subsection{K-Means Comparison}
+
+K-means is an unsupervised algorithm that partitions data into $k$ clusters by minimizing within-cluster variance. Since k-means does not use labels, I mapped each cluster to the most common true label in that cluster:
+
+\begin{lstlisting}
+kmeans = KMeans(n_clusters=3, random_state=42, n_init=10)
+cluster_labels = kmeans.fit_predict(X_scaled)
+
+# map clusters to labels by majority vote
+for cluster_id in range(3):
+    mask = cluster_labels == cluster_id
+    true_labels_in_cluster = true_labels[mask]
+    most_common = mode(true_labels_in_cluster, keepdims=False)
+    mapped_labels[mask] = most_common.mode
+\end{lstlisting}
+
+\subsection{Training Setup}
+
+All networks were trained for 100 epochs with batch size 8 using the Adam optimizer and categorical cross-entropy loss. Data was split 60/20/20 for train/validation/test and normalized with StandardScaler.
+
+\section{Results}
+
+\subsection{Activation Function Experiment}
+
+\begin{table}[H]
+\centering
+\caption{Activation Function Comparison Results}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Activation} & \textbf{Training Acc.} & \textbf{Validation Acc.} & \textbf{Test Acc.} \\
+\midrule
+Sigmoid & 0.8889 & 0.8667 & 0.9333 \\
+Tanh & 0.9333 & 0.9333 & 0.9667 \\
+ReLU & 0.8778 & 0.8667 & 0.8667 \\
+\bottomrule
+\end{tabular}
+\label{tab:activation}
+\end{table}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{plots/activation_learning_curves.png}
+    \caption{Learning curves for each activation function.}
+    \label{fig:activation_curves}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\textwidth]{plots/activation_comparison_bars.png}
+    \caption{Final accuracy comparison across activation functions.}
+    \label{fig:activation_bars}
+\end{figure}
+
+Looking at the learning curves (Figure \ref{fig:activation_curves}), tanh converges smoothly and reaches the highest accuracy. Sigmoid shows more oscillation early on but eventually achieves 93\% test accuracy. ReLU had the slowest start and ended up with 87\% test accuracy in this run.
+
+The results show that tanh performed best here, but this is partly due to the small dataset and random initialization. ReLU is generally preferred for larger, deeper networks because it avoids the saturation problem. On this small dataset with a shallow network, tanh worked well.
+
+\subsection{Architecture Experiment}
+
+\begin{table}[H]
+\centering
+\caption{Architecture Comparison Results}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Architecture} & \textbf{Training Acc.} & \textbf{Validation Acc.} & \textbf{Test Acc.} \\
+\midrule
+Shallow (4$\rightarrow$4$\rightarrow$3) & 0.9333 & 0.9000 & 0.9667 \\
+Wide (4$\rightarrow$16$\rightarrow$3) & 0.9778 & 0.9000 & 1.0000 \\
+Deep (4$\rightarrow$8$\rightarrow$8$\rightarrow$3) & 0.9889 & 0.9333 & 1.0000 \\
+\bottomrule
+\end{tabular}
+\label{tab:architecture}
+\end{table}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{plots/architecture_learning_curves.png}
+    \caption{Learning curves for different architectures.}
+    \label{fig:arch_curves}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{plots/architecture_loss_curves.png}
+    \caption{Loss curves showing training vs validation loss.}
+    \label{fig:arch_loss}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\textwidth]{plots/architecture_comparison_bars.png}
+    \caption{Final accuracy comparison across architectures.}
+    \label{fig:arch_bars}
+\end{figure}
+
+Both the wide and deep networks achieved 100\% test accuracy, while the shallow network got 96.67\%. Looking at the training curves (Figure \ref{fig:arch_curves}), the shallow network plateaus around 90\% validation accuracy, while the wider and deeper networks continue improving.
+
+The deep network has the highest training accuracy (98.89\%) but a noticeable gap to validation accuracy (93.33\%). This gap suggests some overfitting, which makes sense since it has more parameters. The wide network shows a similar pattern. For this simple dataset, even the shallow network does well, but the extra capacity of the larger networks helps achieve perfect test accuracy.
+
+\subsection{K-Means Comparison}
+
+\begin{table}[H]
+\centering
+\caption{K-Means vs Neural Network Comparison}
+\begin{tabular}{lc}
+\toprule
+\textbf{Method} & \textbf{Accuracy} \\
+\midrule
+K-Means (Unsupervised) & 0.8333 \\
+Neural Network (Supervised) & 0.9733 \\
+\bottomrule
+\end{tabular}
+\label{tab:kmeans}
+\end{table}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.7\textwidth]{plots/kmeans_vs_nn_comparison.png}
+    \caption{Accuracy comparison: K-means vs neural network.}
+    \label{fig:kmeans_comparison}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{plots/kmeans_clusters_visualization.png}
+    \caption{Left: K-means clusters. Right: True labels. Setosa (purple) clusters well, but versicolor and virginica overlap.}
+    \label{fig:kmeans_viz}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.5\textwidth]{plots/kmeans_confusion_matrix.png}
+    \caption{Confusion matrix for K-means. Most errors are between versicolor and virginica.}
+    \label{fig:kmeans_cm}
+\end{figure}
+
+K-means achieved 83\% accuracy compared to the neural network's 97\%. Looking at the confusion matrix (Figure \ref{fig:kmeans_cm}), k-means classifies setosa perfectly but confuses versicolor and virginica. This matches what we see in the cluster visualization (Figure \ref{fig:kmeans_viz}): setosa forms a distinct cluster, but the other two species overlap in feature space.
+
+The neural network does better because it uses the labels to learn decision boundaries that actually separate the classes, rather than just finding natural clusters.
+
+\section{Discussion}
+
+\subsection{Activation Functions and the Threshold Function}
+
+The lectures introduced the threshold function as the original activation for artificial neurons. It outputs 1 if the weighted sum exceeds 0, and 0 otherwise. This makes intuitive sense (the neuron either ``fires'' or it does not), but the threshold function is not differentiable at 0, so we cannot compute gradients for backpropagation.
+
+Sigmoid solves this by providing a smooth, differentiable approximation to the threshold. The output is always between 0 and 1, and the function is differentiable everywhere. However, sigmoid saturates (the gradient becomes very small) when inputs are far from 0, which slows learning.
+
+Tanh is similar but centered at 0, outputting values between -1 and 1. ReLU takes a different approach: it is linear for positive inputs and zero for negative inputs. ReLU does not saturate for positive values, which helps with training deep networks.
+
+In our experiment, tanh performed best, but this is likely because our network is shallow and the dataset is small. ReLU's advantages become more apparent in deeper networks where gradient flow matters more.
+
+\subsection{Network Depth and the Degeneracy Problem}
+
+The lecture proved that stacking linear layers does not increase expressiveness. If we have $\mathbf{z} = V(W\mathbf{x})$, this equals $(VW)\mathbf{x}$, which is just another linear transformation. So a two-layer linear network is no more powerful than a one-layer linear network.
+
+Nonlinear activations break this degeneracy. With nonlinearities between layers, deeper networks can learn hierarchical features that shallow networks cannot represent. Our results show this: the deep network (4$\rightarrow$8$\rightarrow$8$\rightarrow$3) achieved perfect test accuracy, while the shallow network (4$\rightarrow$4$\rightarrow$3) topped out at 96.67\%.
+
+However, more layers and parameters also increase the risk of overfitting. The deep network had the largest gap between training accuracy (98.89\%) and validation accuracy (93.33\%), suggesting it was starting to memorize training examples rather than learning general patterns. For the Iris dataset, this was not a major problem because the test accuracy was still perfect, but with less data or more parameters it could become an issue.
+
+\subsection{Supervised vs Unsupervised Learning}
+
+The k-means comparison shows the difference between supervised and unsupervised learning. K-means minimizes within-cluster distortion (as defined in lecture) but knows nothing about class labels. It finds three clusters, but those clusters do not perfectly correspond to the three species.
+
+The neural network, in contrast, directly optimizes for classification accuracy using labeled data. It learns decision boundaries that separate the classes, even when they overlap in feature space. This is why it achieves 97\% accuracy compared to k-means' 83\%.
+
+K-means is still useful when we do not have labels, or when we want to discover natural structure in data. But for classification with labeled data, supervised methods are more appropriate.
+
+\section{Conclusion}
+
+I trained neural networks on the Iris dataset and explored activation functions, architectures, and supervised vs unsupervised learning.
+
+\textbf{Main findings:}
+\begin{itemize}
+    \item Tanh achieved the best test accuracy (96.67\%) in the activation experiment, though all three functions performed reasonably well on this dataset.
+    \item The wide and deep networks both achieved 100\% test accuracy, compared to 96.67\% for the shallow network. The deep network showed signs of overfitting (train-validation gap of about 5.5\%).
+    \item The neural network (97.3\%) significantly outperformed k-means (83.3\%), demonstrating the advantage of supervised learning when labels are available.
+\end{itemize}
+
+The results connect to several lecture topics: the threshold vs sigmoid functions, the degeneracy of linear networks, the importance of nonlinear activations, and the difference between supervised and unsupervised learning.
+
+\end{document}
